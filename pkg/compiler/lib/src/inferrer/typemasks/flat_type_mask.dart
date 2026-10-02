@@ -689,12 +689,30 @@ class FlatTypeMask extends TypeMask {
     }
     assert(a.isSubclass || a.isSubtype);
     assert(b.isSubtype);
+    final classHierarchy = closedWorld.classHierarchy;
     final aBase = a.base!;
+    final bBase = b.base!;
+    // The masks intersect if a strict subclass (or subtype) of [aBase] is a
+    // subtype of [bBase]. Search from whichever side has fewer classes.
+    final aCount = a.isSubclass
+        ? classHierarchy.strictSubclassCount(aBase)
+        : classHierarchy.strictSubtypeCount(aBase);
+    if (classHierarchy.strictSubtypeCount(bBase) < aCount) {
+      for (var element in classHierarchy.subtypesOf(bBase)) {
+        if (element != aBase &&
+            (a.isSubclass
+                ? classHierarchy.isSubclassOf(element, aBase)
+                : classHierarchy.isSubtypeOf(element, aBase))) {
+          return false;
+        }
+      }
+      return true;
+    }
     var elements = a.isSubclass
-        ? closedWorld.classHierarchy.strictSubclassesOf(aBase)
-        : closedWorld.classHierarchy.strictSubtypesOf(aBase);
+        ? classHierarchy.strictSubclassesOf(aBase)
+        : classHierarchy.strictSubtypesOf(aBase);
     for (var element in elements) {
-      if (closedWorld.classHierarchy.isSubtypeOf(element, b.base!)) {
+      if (classHierarchy.isSubtypeOf(element, bBase)) {
         return false;
       }
     }
