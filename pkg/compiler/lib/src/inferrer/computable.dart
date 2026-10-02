@@ -617,6 +617,12 @@ class ComputableAbstractValueDomain with AbstractValueDomain {
   ) => _wrappedDomain.isTargetingMember(_unwrap(receiver), member, name);
 
   @override
+  Iterable<MemberEntity>? potentialTargetsOf(
+    covariant ComputableAbstractValue receiver,
+    Name name,
+  ) => _wrappedDomain.potentialTargetsOf(_unwrap(receiver), name);
+
+  @override
   AbstractBool needsNoSuchMethodHandling(
     covariant ComputableAbstractValue receiver,
     Selector selector,

@@ -229,15 +229,15 @@ class ResolutionWorldBuilder extends WorldBuilder implements World {
   ///
   /// A method is fully invoked if all is optional parameter have been passed
   /// in some invocation.
-  final Map<String, Set<MemberUsage>> _invokableInstanceMembersByName = {};
+  final Map<String, _PendingMemberUsages> _invokableInstanceMembersByName = {};
 
   /// Map containing instance members of live classes that have not yet been
   /// read from dynamically.
-  final Map<String, Set<MemberUsage>> _readableInstanceMembersByName = {};
+  final Map<String, _PendingMemberUsages> _readableInstanceMembersByName = {};
 
   /// Map containing instance members of live classes that have not yet been
   /// written to dynamically.
-  final Map<String, Set<MemberUsage>> _writableInstanceMembersByName = {};
+  final Map<String, _PendingMemberUsages> _writableInstanceMembersByName = {};
 
   final Set<FieldEntity> _fieldSetters = {};
 
@@ -471,11 +471,23 @@ class ResolutionWorldBuilder extends WorldBuilder implements World {
     String methodName = selector.name;
 
     void process(
-      Map<String, Set<MemberUsage>> memberMap,
+      Map<String, _PendingMemberUsages> memberMap,
       EnumSet<MemberUse> Function(MemberUsage usage) action,
       bool Function(MemberUsage usage) shouldBeRemoved,
     ) {
-      _processSet(memberMap, methodName, (MemberUsage usage) {
+      final pending = memberMap[methodName];
+      if (pending == null) return;
+      final constraint = dynamicUse.receiverConstraint as ClassEntity?;
+      // Only members declared in a superclass (or mixin) of a live subtype of
+      // [constraint] can be hit, so when there are few such subtypes we avoid
+      // testing every pending member with this name.
+      final holders = constraint == null
+          ? null
+          : classHierarchyBuilder.potentialHoldersOfMembersInheritedInSubtypeOf(
+              constraint,
+              limit: pending.concreteCount,
+            );
+      pending.update(holders, (MemberUsage usage) {
         if (usage.entity.isAbstract ||
             selector.appliesUnnamed(usage.entity) &&
                 (_selectorConstraintsStrategy.appliedUnnamed(
@@ -773,29 +785,6 @@ class ResolutionWorldBuilder extends WorldBuilder implements World {
     });
   }
 
-  /// Call [updateUsage] on all [MemberUsage]s in the set in [map] for
-  /// [memberName]. If [updateUsage] returns `true` the usage is removed from
-  /// the set.
-  void _processSet(
-    Map<String, Set<MemberUsage>> map,
-    String memberName,
-    bool Function(MemberUsage e) updateUsage,
-  ) {
-    Set<MemberUsage>? members = map[memberName];
-    if (members == null) return;
-    // [f] might add elements to [: map[memberName] :] during the loop below
-    // so we create a new list for [: map[memberName] :] and prepend the
-    // [remaining] members after the loop.
-    map[memberName] = {};
-    Set<MemberUsage> remaining = {};
-    for (MemberUsage usage in members) {
-      if (!updateUsage(usage)) {
-        remaining.add(usage);
-      }
-    }
-    map[memberName]!.addAll(remaining);
-  }
-
   (MemberUsage, EnumSet<MemberUse>) _getMemberUsage(
     MemberEntity member, {
     bool checkEnqueuerConsistency = false,
@@ -856,17 +845,17 @@ class ResolutionWorldBuilder extends WorldBuilder implements World {
         if (!checkEnqueuerConsistency) {
           if (usage.hasPendingDynamicInvoke) {
             _invokableInstanceMembersByName
-                .putIfAbsent(memberName, () => {})
+                .putIfAbsent(memberName, _PendingMemberUsages.new)
                 .add(usage);
           }
           if (usage.hasPendingDynamicRead) {
             _readableInstanceMembersByName
-                .putIfAbsent(memberName, () => {})
+                .putIfAbsent(memberName, _PendingMemberUsages.new)
                 .add(usage);
           }
           if (usage.hasPendingDynamicWrite) {
             _writableInstanceMembersByName
-                .putIfAbsent(memberName, () => {})
+                .putIfAbsent(memberName, _PendingMemberUsages.new)
                 .add(usage);
           }
         }
@@ -1136,5 +1125,64 @@ class ResolutionWorldBuilder extends WorldBuilder implements World {
       _closedWorldCache = closedWorld;
     }
     return closedWorld;
+  }
+}
+
+/// The [MemberUsage]s for members of a given name that still have pending
+/// dynamic uses, indexed by the class declaring the member.
+class _PendingMemberUsages {
+  /// Abstract members are hit by any selector with a matching name, so they
+  /// are not indexed by class.
+  final Set<MemberUsage> _abstractUsages = {};
+
+  final Map<ClassEntity, Set<MemberUsage>> _concreteUsagesByClass = {};
+
+  int _concreteCount = 0;
+
+  /// The number of pending usages of non-abstract members.
+  int get concreteCount => _concreteCount;
+
+  void add(MemberUsage usage) {
+    if (usage.entity.isAbstract) {
+      _abstractUsages.add(usage);
+    } else if ((_concreteUsagesByClass[usage.entity.enclosingClass!] ??= {})
+        .add(usage)) {
+      _concreteCount++;
+    }
+  }
+
+  void remove(MemberUsage usage) {
+    if (usage.entity.isAbstract) {
+      _abstractUsages.remove(usage);
+      return;
+    }
+    final cls = usage.entity.enclosingClass!;
+    final usages = _concreteUsagesByClass[cls];
+    if (usages != null && usages.remove(usage)) {
+      _concreteCount--;
+      if (usages.isEmpty) _concreteUsagesByClass.remove(cls);
+    }
+  }
+
+  /// Calls [updateUsage] on the pending usages and removes those for which it
+  /// returns `true`.
+  ///
+  /// If [holders] is non-null, only concrete members declared in one of the
+  /// [holders] classes are visited. Abstract members are always visited.
+  void update(
+    Iterable<ClassEntity>? holders,
+    bool Function(MemberUsage usage) updateUsage,
+  ) {
+    // [updateUsage] might add usages to this set, so iterate over a snapshot.
+    final List<MemberUsage> candidates = [
+      ..._abstractUsages,
+      if (holders == null)
+        for (final usages in _concreteUsagesByClass.values) ...usages
+      else
+        for (final cls in holders) ...?_concreteUsagesByClass[cls],
+    ];
+    for (final usage in candidates) {
+      if (updateUsage(usage)) remove(usage);
+    }
   }
 }
