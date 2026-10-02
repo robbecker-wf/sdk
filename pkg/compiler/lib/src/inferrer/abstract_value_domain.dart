@@ -597,6 +597,14 @@ mixin AbstractValueDomain {
     Name name,
   );
 
+  /// Returns a superset of the members for which [isTargetingMember] can be
+  /// potentially true for [receiver] and [name], or `null` if no such set can
+  /// be computed cheaply.
+  Iterable<MemberEntity>? potentialTargetsOf(
+    AbstractValue receiver,
+    Name name,
+  ) => null;
+
   /// Returns an [AbstractBool] that describes whether [selector] invoked on a
   /// [receiver] can hit a [noSuchMethod].
   AbstractBool needsNoSuchMethodHandling(

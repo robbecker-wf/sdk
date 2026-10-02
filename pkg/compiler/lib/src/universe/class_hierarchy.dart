@@ -814,6 +814,42 @@ class ClassHierarchyBuilder {
         _InheritedInSubtypeCache();
     return cache.isInheritedInSubtypeOf(this, x, y);
   }
+
+  /// Returns a superset of the classes `x` for which a dynamic access with
+  /// receiver constraint [y] can currently hit a member declared in `x`, that
+  /// is, `Null`, `JSNull`, and the superclasses and mixins of the explicitly
+  /// instantiated subtypes of [y].
+  ///
+  /// Returns `null` if [y] has more than [limit] explicitly instantiated
+  /// subtypes, in which case the caller should test all candidates instead.
+  Set<ClassEntity>? potentialHoldersOfMembersInheritedInSubtypeOf(
+    ClassEntity y, {
+    required int limit,
+  }) {
+    final classSet = _classSets[y];
+    if (classSet == null) return null;
+    final holders = <ClassEntity>{
+      _commonElements.nullClass,
+      _commonElements.jsNullClass,
+    };
+    final visited = <ClassEntity>{};
+    int count = 0;
+    for (final cls in classSet.subtypesByMask(
+      ClassHierarchyNode.explicitlyInstantiated,
+    )) {
+      if (++count > limit) return null;
+      ClassEntity? current = cls;
+      while (current != null && visited.add(current)) {
+        holders.add(current);
+        ClassEntity? mixin = _elementMap.getAppliedMixin(current as JClass);
+        while (mixin != null && holders.add(mixin)) {
+          mixin = _elementMap.getAppliedMixin(mixin as JClass);
+        }
+        current = _elementMap.getSuperClass(current);
+      }
+    }
+    return holders;
+  }
 }
 
 /// Cache used for computing when a member of a given class, the so-called
