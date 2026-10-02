@@ -112,6 +112,9 @@ class MemberHierarchyBuilder {
   final Map<Selector, Setlet<MemberEntity>> _dynamicRoots = {};
   final Map<MemberEntity, Setlet<MemberEntity>> _overrides = {};
 
+  /// The inverse of [_overrides]: maps a member to the members it overrides.
+  final Map<MemberEntity, Setlet<MemberEntity>> _overridden = {};
+
   MemberHierarchyBuilder(this.closedWorld);
 
   /// Applies [f] to each override of [entity].
@@ -168,6 +171,29 @@ class MemberHierarchyBuilder {
     if (target.isVirtual) {
       forEachOverride(target.member, f);
     }
+  }
+
+  /// Returns `true` if [member] is one of the members represented by [target],
+  /// that is, one of the members [forEachTargetMember] visits for [target].
+  ///
+  /// Members typically override few other members but can have many
+  /// overrides, so this searches upwards from [member] rather than iterating
+  /// the overrides of [target].
+  bool isTargetMember(DynamicCallTarget target, MemberEntity member) {
+    final entity = target.member;
+    if (member == entity) return true;
+    if (!target.isVirtual) return false;
+    final visited = {member};
+    final worklist = [member];
+    while (worklist.isNotEmpty) {
+      final overridden = _overridden[worklist.removeLast()];
+      if (overridden == null) continue;
+      for (final parent in overridden) {
+        if (parent == entity) return true;
+        if (visited.add(parent)) worklist.add(parent);
+      }
+    }
+    return false;
   }
 
   void _forEachOverrideSkipVisited(
@@ -408,6 +434,7 @@ class MemberHierarchyBuilder {
     void addParent(MemberEntity child, MemberEntity parent) {
       if (child == parent) return;
       if (!isMixinUse && (_overrides[parent] ??= Setlet()).add(child)) {
+        (_overridden[child] ??= Setlet()).add(parent);
         join(parent, child);
       }
 
@@ -420,6 +447,7 @@ class MemberHierarchyBuilder {
       if (isMixinUse &&
           child.isAbstract &&
           (_overrides[child] ??= Setlet()).add(parent)) {
+        (_overridden[parent] ??= Setlet()).add(child);
         join(child, parent);
       }
     }
