@@ -4796,6 +4796,10 @@ class MemorySet {
   >
   fieldValues = {};
 
+  /// The entries of [fieldValues] for fields that are not [isFinal]. These are
+  /// the only entries that can be killed by side effects.
+  final Map<Object, Map<HInstruction?, HInstruction?>> _mutableFieldValues = {};
+
   /// Maps a receiver to a map of keys to value.
   final Map<HInstruction, Map<HInstruction, HInstruction?>> keyedValues = {};
 
@@ -4827,6 +4831,20 @@ class MemorySet {
 
   bool isFinal(Object element) {
     return element is MemberEntity && closedWorld.fieldNeverChanges(element);
+  }
+
+  Map<HInstruction?, HInstruction?> _fieldValuesFor(Object field) {
+    return fieldValues[field] ??= _addFieldValues(field, {}, isFinal(field));
+  }
+
+  Map<HInstruction?, HInstruction?> _addFieldValues(
+    Object field,
+    Map<HInstruction?, HInstruction?> values,
+    bool isFinal,
+  ) {
+    fieldValues[field] = values;
+    if (!isFinal) _mutableFieldValues[field] = values;
+    return values;
   }
 
   bool isConcrete(HInstruction? instruction) {
@@ -4895,7 +4913,7 @@ class MemorySet {
     // [value] is being set in some place in memory, we remove it from the
     // unaliased set.
     unaliasedAllocations.remove(value.nonCheck());
-    final map = fieldValues.putIfAbsent(field, () => {});
+    final map = _fieldValuesFor(field);
     bool isRedundant = map[receiver] == value;
     map.forEach((key, value) {
       if (mayAlias(receiver, key)) map[key] = null;
@@ -4918,7 +4936,7 @@ class MemorySet {
     if (field is MemberEntity && closedWorld.nativeData.isNativeMember(field)) {
       return; // TODO(14955): Remove this restriction?
     }
-    final map = fieldValues.putIfAbsent(field, () => {});
+    final map = _fieldValuesFor(field);
     map[receiver] = value;
   }
 
@@ -4952,8 +4970,7 @@ class MemorySet {
       List<HInstruction?> receiversToRemove = [];
 
       List<Object>? fieldsToRemove;
-      fieldValues.forEach((Object element, map) {
-        if (isFinal(element)) return;
+      _mutableFieldValues.forEach((Object element, map) {
         map.forEach((receiver, value) {
           if (isAliased(receiver)) {
             receiversToRemove.add(receiver);
@@ -4967,7 +4984,10 @@ class MemorySet {
         }
         receiversToRemove.clear();
       });
-      fieldsToRemove?.forEach(fieldValues.remove);
+      fieldsToRemove?.forEach((element) {
+        fieldValues.remove(element);
+        _mutableFieldValues.remove(element);
+      });
     }
 
     if (instruction.sideEffects.changesIndex()) {
@@ -5191,7 +5211,11 @@ class MemorySet {
     MemorySet result = MemorySet(closedWorld);
 
     fieldValues.forEach((element, values) {
-      result.fieldValues[element] = Map.of(values);
+      result._addFieldValues(
+        element,
+        Map.of(values),
+        !_mutableFieldValues.containsKey(element),
+      );
     });
 
     keyedValues.forEach((receiver, values) {

@@ -889,6 +889,39 @@ class CommonMasks with AbstractValueDomain {
   }
 
   @override
+  Iterable<MemberEntity>? potentialTargetsOf(
+    covariant TypeMask receiver,
+    Name name,
+  ) {
+    TypeMask mask = receiver;
+    while (mask is ForwardingTypeMask) {
+      mask = mask.forwardTo;
+    }
+    if (mask is! FlatTypeMask || mask.isEmptyOrSpecial || !mask.isExact) {
+      return null;
+    }
+    // [FlatTypeMask.canHit] on an exact mask only accepts members of `JSNull`
+    // and the first concrete member found by [JClosedWorld.hasElementIn].
+    final elementEnvironment = closedWorld.elementEnvironment;
+    final targets = <MemberEntity>[];
+    final jsNullMember = elementEnvironment.lookupLocalClassMember(
+      commonElements.jsNullClass,
+      name,
+    );
+    if (jsNullMember != null) targets.add(jsNullMember);
+    ClassEntity? current = mask.base;
+    while (current != null) {
+      final member = elementEnvironment.lookupLocalClassMember(current, name);
+      if (member != null && !member.isAbstract) {
+        if (member != jsNullMember) targets.add(member);
+        break;
+      }
+      current = elementEnvironment.getSuperClass(current);
+    }
+    return targets;
+  }
+
+  @override
   AbstractBool needsNoSuchMethodHandling(
     covariant TypeMask receiver,
     Selector selector,

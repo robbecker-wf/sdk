@@ -165,6 +165,7 @@ class FunctionSetNode {
         set.add(element);
       }
       if (cache.isNotEmpty) cache.clear();
+      _positions = null;
     }
   }
 
@@ -178,6 +179,7 @@ class FunctionSetNode {
         list[index] = last;
       }
       if (cache.isNotEmpty) cache.clear();
+      _positions = null;
     } else {
       final set = elements as List<MemberEntity>;
       if (set.remove(element)) {
@@ -185,6 +187,7 @@ class FunctionSetNode {
         // not transition back to the list representation even if we
         // end up with few enough elements at this point.
         if (cache.isNotEmpty) cache.clear();
+        _positions = null;
       }
     }
   }
@@ -208,8 +211,17 @@ class FunctionSetNode {
     FunctionSetQuery? result = cache[selectorMask];
     if (result != null) return result;
 
+    Iterable<MemberEntity> candidates = elements;
+    if (!isList) {
+      final targets = domain.potentialTargetsOf(
+        selectorMask.receiver,
+        selectorMask.selector.memberName,
+      );
+      if (targets != null) candidates = _inElementOrder(targets);
+    }
+
     Setlet<MemberEntity>? functions;
-    for (MemberEntity element in elements) {
+    for (MemberEntity element in candidates) {
       if (selectorMask._applies(element, domain)) {
         // Defer the allocation of the functions set until we are
         // sure we need it. This allows us to return immutable empty
@@ -239,6 +251,19 @@ class FunctionSetNode {
         ? FullFunctionSetQuery(functions)
         : const EmptyFunctionSetQuery();
     return result;
+  }
+
+  /// The position of each element in [elements], computed on demand.
+  Map<MemberEntity, int>? _positions;
+
+  /// Returns the members of [targets] that are in [elements], in the order
+  /// they occur in [elements].
+  List<MemberEntity> _inElementOrder(Iterable<MemberEntity> targets) {
+    final positions = _positions ??= {
+      for (final (i, element) in elements.indexed) element: i,
+    };
+    return targets.where(positions.containsKey).toList()
+      ..sort((a, b) => positions[a]!.compareTo(positions[b]!));
   }
 
   @override
