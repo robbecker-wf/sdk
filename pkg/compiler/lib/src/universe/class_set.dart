@@ -614,6 +614,20 @@ class ClassSet {
     return count;
   }
 
+  /// Returns `true` if [instantiatedSubtypeCount] is greater than zero.
+  bool get hasInstantiatedSubtypes {
+    if (node.instantiatedSubclassCount > 0) return true;
+    if (_subtypes != null) {
+      for (ClassHierarchyNode subtypeNode in _subtypes!) {
+        if (subtypeNode.isExplicitlyInstantiated ||
+            subtypeNode.instantiatedSubclassCount > 0) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Returns `true` if all instantiated subtypes of [cls] are subclasses of
   /// [cls].
   bool get hasOnlyInstantiatedSubclasses {
