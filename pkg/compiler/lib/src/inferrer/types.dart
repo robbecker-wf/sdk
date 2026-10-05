@@ -214,6 +214,9 @@ class GlobalTypeInferenceTask extends CompilerTask {
             );
         results = inferrer.analyzeMain(mainElement);
         _metrics = inferrer.metrics;
+        // The inferrer retains the whole type graph, which is not needed once
+        // the results have been built.
+        if (!retainDataForTesting) typesInferrerInternal = null;
       }
       closedWorld.noSuchMethodData.categorizeComplexImplementations(results);
       if (retainDataForTesting) {
