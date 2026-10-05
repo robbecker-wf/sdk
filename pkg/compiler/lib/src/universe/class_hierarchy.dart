@@ -431,7 +431,7 @@ class ClassHierarchyImpl implements ClassHierarchy {
 
   @override
   bool hasAnyStrictSubtype(ClassEntity cls) {
-    return strictSubtypeCount(cls) > 0;
+    return _classSets[cls]?.hasInstantiatedSubtypes ?? false;
   }
 
   @override
