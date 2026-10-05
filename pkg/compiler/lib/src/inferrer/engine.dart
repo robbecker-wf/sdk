@@ -109,6 +109,11 @@ class InferrerEngine {
   final Map<MemberEntity, KernelGlobalTypeInferenceElementData> _memberData =
       <MemberEntity, KernelGlobalTypeInferenceElementData>{};
 
+  /// The combined side effects of the targets of a dynamic call, keyed by
+  /// selector and receiver mask. See [_calleeSideEffects].
+  final Map<Selector, Map<AbstractValue?, SideEffectsBuilder>>
+  _calleeSideEffectsCache = {};
+
   ElementEnvironment get _elementEnvironment => closedWorld.elementEnvironment;
 
   AbstractValueDomain get abstractValueDomain =>
@@ -156,6 +161,31 @@ class InferrerEngine {
   // TODO(johnniwinther): Make this private again.
   KernelGlobalTypeInferenceElementData dataOfMember(MemberEntity element) =>
       _memberData[element] ??= KernelGlobalTypeInferenceElementData();
+
+  /// Returns a builder that combines the side effects of every target of
+  /// [selector] on [mask], shared by all call sites with that selector and
+  /// mask.
+  ///
+  /// Side effects are only propagated between builders when the inferred
+  /// data is closed, after inference. Until then the returned builder's
+  /// [SideEffectsBuilder.sideEffects] contains only the effects the targets
+  /// contribute directly, and callers must add these as well as adding the
+  /// builder as an input.
+  SideEffectsBuilder _calleeSideEffects(
+    Selector selector,
+    AbstractValue? mask,
+    MemberEntity caller,
+  ) {
+    final forSelector = _calleeSideEffectsCache[selector] ??= {};
+    final cached = forSelector[mask];
+    if (cached != null) return cached;
+    final result = forSelector[mask] = SideEffectsBuilder(caller);
+    forEachElementMatching(selector, mask, (element) {
+      _updateSideEffects(result, selector, element);
+      return true;
+    });
+    return result;
+  }
 
   /// Update [sideEffects] with the side effects of [callee] being
   /// called with [selector].
@@ -1440,10 +1470,9 @@ class InferrerEngine {
       sideEffectsBuilder.setAllSideEffectsAndDependsOnSomething();
     }
 
-    forEachElementMatching(selector, mask, (element) {
-      _updateSideEffects(sideEffectsBuilder, selector, element);
-      return true;
-    });
+    final calleeSideEffects = _calleeSideEffects(selector, mask, caller);
+    sideEffectsBuilder.add(calleeSideEffects.sideEffects);
+    sideEffectsBuilder.addInput(calleeSideEffects);
 
     CallSiteTypeInformation info = DynamicCallSiteTypeInformation(
       abstractValueDomain,
@@ -1534,6 +1563,7 @@ class InferrerEngine {
     types.allocatedCalls.clear();
 
     _defaultTypeOfParameter.clear();
+    _calleeSideEffectsCache.clear();
 
     types.parameterTypeInformations.values.forEach(cleanup);
     types.memberTypeInformations.values.forEach(cleanup);
