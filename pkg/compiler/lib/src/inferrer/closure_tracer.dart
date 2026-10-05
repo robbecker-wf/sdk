@@ -147,9 +147,9 @@ class ClosureTracerVisitor extends TracerVisitor {
         if (user is MemberTypeInformation) {
           final currentUserMember = user.member;
           if (info.targets.any(
-            (target) => inferrer.memberHierarchyBuilder.anyTargetMember(
+            (target) => inferrer.memberHierarchyBuilder.isTargetMember(
               target,
-              (element) => element == currentUserMember,
+              currentUserMember,
             ),
           )) {
             _registerCallForLaterAnalysis(info);
